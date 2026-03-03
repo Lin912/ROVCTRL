@@ -1,10 +1,3 @@
-"""
-水下机器人PID位姿控制系统
-基于论文: "A Novel Couple Method.pdf" 中的ROV参数
-作者: T. Zhang
-日期: 2026-02-01
-"""
-
 import numpy as np
 import pandas as pd
 import time
@@ -17,10 +10,10 @@ import control as ct
 import control.optimal as opt
 
 class ROVConfig:
-    """ROV配置参数 - 基于论文Table 4和Table 5"""
+    """ROV配置参数"""
     
     def __init__(self):
-        # 机器人基本参数 (Table 5)
+        # 机器人基本参数
         self.mass_air = 50.0  # kg (空气中质量)
         self.mass_submerged = 1.642  # kg (水下质量)
         self.length = 0.660  # m
@@ -28,18 +21,18 @@ class ROVConfig:
         self.height = 0.410  # m
         self.design_speed = 0.40  # m/s
         
-        # 重心位置 (Table 5)
+        # 重心位置
         self.CG = np.array([-0.129, 0.000, -0.005])  # m (Xr, Yr, Zr坐标系)
         
-        # 拖曳点位置 (Table 5)
+        # 拖曳点位置
         self.towing_point = np.array([0.000, 0.000, 0.000])  # m
         
-        # 螺旋桨配置 - KA 4-70系列 (Table 4)
+        # 螺旋桨配置KA 4-70
         self.n_propellers = 6
-        self.propeller_radius = 0.050  # m
-        self.propeller_deflection_angle = np.deg2rad(30)  # 30度偏角
+        self.propeller_radius = 0.050  # 螺旋桨尺寸
+        self.propeller_deflection_angle = np.deg2rad(30)  # 30度安装偏置角度
         
-        # 螺旋桨布局 (Figure 8)
+        # 螺旋桨布局
         # 后推进器横向偏移
         self.Bbp = 0.150  # m (Aft thrusters lateral offset)
         # 前推进器横向偏移
@@ -55,13 +48,13 @@ class ROVConfig:
         # CG到中心线的垂向距离
         self.H0 = 0.100  # m
         
-        # 螺旋桨位置计算 (基于图8的坐标系)
+        # 螺旋桨位置计算
         self._calculate_propeller_positions()
         
-        # 推力配置矩阵 (6自由度 x 6推进器)
+        # 推力配置矩阵
         self._calculate_thrust_allocation_matrix()
         
-        # 螺旋桨敞水曲线参数 (KA 4-70系列)
+        # 螺旋桨敞水曲线参数
         self._init_propeller_curves()
         
     def _calculate_propeller_positions(self):
@@ -105,7 +98,7 @@ class ROVConfig:
         
     def _calculate_thrust_allocation_matrix(self):
         """计算推力配置矩阵 A (6x6)
-        将6个推进器的推力映射到6自由度力和力矩
+        将6个推进器的推力映射 -> (6自由度)力和力矩
         """
         self.A_matrix = np.zeros((6, 6))
         
@@ -121,7 +114,7 @@ class ROVConfig:
             
     def _init_propeller_curves(self):
         """初始化KA 4-70螺旋桨敞水曲线
-        基于螺旋桨理论: T = ρ D^4 KT(J) n|n|
+        基于螺旋桨理论: T = rho * D^4 * K_T * (J) * n|n|
         """
         # 水的密度
         self.rho_water = 1000  # kg/m³
@@ -135,13 +128,12 @@ class ROVConfig:
         self.KT_points = np.array([0.38, 0.35, 0.32, 0.28, 0.24, 0.19, 0.14, 0.08, 0.02])
         
         # 创建插值函数
-        self.KT_interp = interp1d(self.J_points, self.KT_points, 
-                                  kind='cubic', fill_value='extrapolate')
+        self.KT_interp = interp1d(self.J_points, self.KT_points, kind='cubic', fill_value='extrapolate') # "cubic extrapolate -> 三次曲线外推"
         
     def thrust_to_rpm(self, T_desired, Va):
         """
         根据期望推力和进速计算所需转速
-        逆螺旋桨模型: T = ρ D^4 KT(J) n|n|
+        逆螺旋桨模型: T = rho * D^4 * K_T * (J) * n|n|
         
         Parameters:
         -----------
@@ -170,10 +162,10 @@ class ROVConfig:
         # 简单迭代
         for _ in range(5):
             J = Va / (n_rps * self.D_prop) if n_rps > 0.1 else 0
-            J = np.clip(J, 0, 0.8)
-            KT = self.KT_interp(J)
-            n_rps_new = np.sqrt(T_abs / (self.rho_water * self.D_prop**4 * KT))
-            n_rps = 0.5 * n_rps + 0.5 * n_rps_new
+            J = np.clip(J, 0, 0.8) # 限制进速系数在(0.0, 0.8)
+            KT = self.KT_interp(J) # 计算得到推力系数
+            n_rps_new = np.sqrt(T_abs / (self.rho_water * self.D_prop**4 * KT)) # 计算新的转速
+            n_rps = 0.5 * n_rps + 0.5 * n_rps_new # 松弛迭代,逐渐找到自洽的转速值
             
         return sign * n_rps * 60  # 转换为RPM
 
