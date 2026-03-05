@@ -1,0 +1,35 @@
+# rov_config.yaml
+robot:
+  mass_air: 50.0        # 空气中质量 (kg)
+  mass_submerged: 1.642 # 水下质量 (kg)
+  dimensions:           # 尺寸: 长, 宽, 高 (m)
+    - 0.660
+    - 0.524
+    - 0.410
+  cg:                   # 重心位置 [x, y, z]
+    - -0.129
+    - 0.000
+    - -0.005
+  thrusters:
+    max_rpm: 2000
+    deflection_angle_deg: 30 # 安装偏置角度(度) 
+
+pid:
+  position:
+    kp: [50.0, 50.0, 80.0]
+    ki: [5.0, 5.0, 10.0]
+    kd: [30.0, 30.0, 40.0]
+    max_integral: [100.0, 100.0, 200.0]
+  attitude:
+    kp: [20.0, 20.0, 40.0]
+    ki: [2.0, 2.0, 5.0]
+    kd: [15.0, 15.0, 25.0]
+    max_integral: [50.0, 50.0, 100.0]
+  limits:
+    max_force: 200.0
+    max_moment: 50.0
+
+system:
+  control_rate: 100
+  sensor_file: 'rov_sensor_data.txt'
+  cmd_file: 'motor_commands.txt'
