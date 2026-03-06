@@ -1,0 +1,37 @@
+内存采用小端序（Little-Endian）对齐。
+以下是这 1032 字节在当前情况下的绝对精确内存地契（Memory Layout）
+
+字节偏移量	 ||数据类型	  ||变量名	                  ||占用空间	 ||写入方	        ||读取方	            ||作用描述
+0 ~ 3	    ||int32	    ||OFFSET_PROGRAM_STARCCM	||4 字节	  ||Python / C++	 ||STAR-CCM+	        ||值为 1 时，唤醒 STAR-CCM+ 进行流场步进
+4 ~ 7	    ||int32	    ||OFFSET_PROGRAM_CITRINE	||4 字节	  ||STAR-CCM+	     ||Python / C++	        ||值为 1 时，唤醒 Python 控制器和 Tethra 计算
+
+
+字节偏移量	 数据类型	  变量名	      占用空间	   物理含义
+8 ~ 15	    double	    timestamp       8 字节	    当前仿真的物理时间 (s)
+16 ~ 23	    double	    x	            8 字节	    X 轴绝对位置 (m)
+24 ~ 31	    double	    y	            8 字节	    Y 轴绝对位置 (m)
+32 ~ 39	    double	    z	            8 字节	    Z 轴绝对位置 (m)
+40 ~ 47	    double	    roll	        8 字节	    滚转角 (rad 或 deg，取决于报告设置)
+48 ~ 55	    double	    pitch	        8 字节	    俯仰角 (rad 或 deg)
+56 ~ 63	    double	    yaw	            8 字节	    偏航角 (rad 或 deg)
+64 ~ 71	    double	    u	            8 字节	    相对线速度 X 分量 (m/s)
+72 ~ 79	    double	    v	            8 字节	    相对线速度 Y 分量 (m/s)
+80 ~ 87	    double	    w	            8 字节	    相对线速度 Z 分量 (m/s)
+88 ~ 95	    double	    p	            8 字节	    相对角速度 X 分量 (rad/s)
+96 ~ 103	double	    q	            8 字节	    相对角速度 Y 分量 (rad/s)
+104 ~ 111	double	    r	            8 字节	    相对角速度 Z 分量 (rad/s)
+
+字节偏移量	 数据类型	  变量名  占用空间	   物理含义
+112 ~ 119	double	    rpm_0	8 字节	    右后推进器转速 (T0)
+120 ~ 127	double	    rpm_1	8 字节	    左后推进器转速 (T1)
+128 ~ 135	double	    rpm_2	8 字节	    右前推进器转速 (T2)
+136 ~ 143	double	    rpm_3	8 字节	    左前推进器转速 (T3)
+144 ~ 151	double	    rpm_4	8 字节	    右上垂向推进器转速 (T4)
+152 ~ 159	double	    rpm_5	8 字节	    左上垂向推进器转速 (T5)
+
+字节偏移量   数据类型	变量名	  占用空间	  物理含义
+160 ~ 167	double	  forceX	8 字节	   绳缆作用力 X 分量 (N)
+168 ~ 175	double	  forceY	8 字节	   绳缆作用力 Y 分量 (N)
+176 ~ 183	double	  forceZ	8 字节	   绳缆作用力 Z 分量 (N)
+
+预留/未使用区 (184 - 1031 字节):这部分是由 char data[1024] 声明的剩余内存空间。
