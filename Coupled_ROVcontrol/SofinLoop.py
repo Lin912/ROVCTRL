@@ -14,13 +14,14 @@ class CoSimInterface:
         char data[1024];            // Offset: 8 (1024 bytes)
     };
     """
+    
     def __init__(self, use_dummy=False, filename="ControlDirect_SharedMemory"):
         self.use_dummy = use_dummy
         self.filename = filename
         
         # 字节偏移量定义
         self.OFFSET_STARCCM = 0
-        self.OFFSET_CITRINE = 4
+        self.OFFSET_ROVCTRL = 4
         self.OFFSET_DATA_START = 8
         
         # 假设 CFD 传来的状态是 13 个 double (104字节)，写在 data 的开头
@@ -51,7 +52,7 @@ class CoSimInterface:
             }
 
     def wait_for_cfd_data(self):
-        """阻塞等待 CITRINE 标志位置 1, 读取状态数据"""
+        """阻塞等待 ROVCTRL 标志位置 1, 读取状态数据"""
         if self.use_dummy:
             self.sim_time += self.dt
             self.dummy_state['timestamp'] = self.sim_time
@@ -60,12 +61,12 @@ class CoSimInterface:
             return self.dummy_state.copy()
             
         while True:
-            # 读取 CITRINE 的轮询标志位
-            self.mm.seek(self.OFFSET_CITRINE)
-            citrine_turn = struct.unpack('i', self.mm.read(4))[0]
+            # 读取 ROVCTRL 的轮询标志位
+            self.mm.seek(self.OFFSET_ROVCTRL)
+            rovctrl_turn = struct.unpack('i', self.mm.read(4))[0]
             
-            if citrine_turn == 1:
-                # 轮到控制模块计算，读取 CFD 写入的 13 个 double 数据
+            if rovctrl_turn == 1:
+                # 轮到控制模块计算，读取 CFD 写入的 13 个 double 数据 -> (时间戳 + 水下机器人的位姿信息)
                 self.mm.seek(self.READ_OFFSET)
                 raw_data = self.mm.read(104) # 13 * 8 字节
                 unpacked = struct.unpack('13d', raw_data)
@@ -94,8 +95,8 @@ class CoSimInterface:
         self.mm.seek(self.WRITE_OFFSET)
         self.mm.write(rpm_bytes)
         
-        # 3. 翻转标志位：CITRINE = 0, STARCCM = 1 (三方握手)
-        self.mm.seek(self.OFFSET_CITRINE)
+        # 3. 翻转标志位：ROVCTRL = 0, STARCCM = 1 (三方握手)
+        self.mm.seek(self.OFFSET_ROVCTRL)
         self.mm.write(struct.pack('i', 0))
         
         self.mm.seek(self.OFFSET_STARCCM)

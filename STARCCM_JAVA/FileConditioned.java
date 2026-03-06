@@ -17,7 +17,7 @@ import java.util.concurrent.locks.Condition;
 public class FileConditioned extends StarMacro {
     private static final String FILE_SHARED = "../HydroSimulation/ControlDirect_SharedMemory";
     private static final int OFFSET_PROGRAM_STARCCM = 0;
-    private static final int OFFSET_PROGRAM_CITRINE = 4;
+    private static final int OFFSET_PROGRAM_ROVCTRL = 4;
     private static final int BUFFER_SIZE = 1024 + 8; //缓冲区
     private static final int OFFSET_DATA_START = 8;  //配置数据起始点
 
@@ -50,31 +50,33 @@ public class FileConditioned extends StarMacro {
                             rpms[i] = buffer.getDouble(OFFSET_RPM_IN + (i * 8));
                         }
                         
-                        // 读取 Tethra 计算出的绳缆力 (X, Y, Z)
-                        double forceX = buffer.getDouble(OFFSET_FORCE_IN);
-                        double forceY = buffer.getDouble(OFFSET_FORCE_IN + 8);
-                        double forceZ = buffer.getDouble(OFFSET_FORCE_IN + 16); 
-
-                        ContinuumBody continuumBody = ((ContinuumBody) simulation.get(star.sixdof.BodyManager.class).getObject("MainBody"));//Body's Name
-                        ExternalForce externalForce = ((ExternalForce) continuumBody.getExternalForceAndMomentManager().getObject("CableForce"));//Force's Name              
-                        Units units_N = ((Units) simulation.getUnitsManager().getObject("N"));
-                        externalForce.getForce().setComponentsAndUnits(-forceX, -forceY, -forceZ, units_N);//Force value
-                        Units units_1 = ((Units) simulation.getUnitsManager().getObject("m"));
-                        externalForce.getPositionAsCoordinate().setCoordinate(units_1, units_1, units_1, new DoubleVector(new double[] {-0.22, 0.0, -0.00497}));//Force acting point
-                        
-                        // 3. 将 RPM 应用到螺旋桨 (使用全局参数 Global Parameter)
+                        // 将 RPM 应用到螺旋桨 (使用全局参数 Global Parameter)
                         // STAR-CCM+ 界面中创建 6 个标量全局参数 (Global Parameter)，例如命名为 "RPM_0" 到 "RPM_5"
                         // 旋转坐标系的转速链接到这些参数上
                         try {
                             for (int i = 0; i < 6; i++) {
                                 String paramName = "RPM_" + i;
                                 ScalarGlobalParameter rpmParam = (ScalarGlobalParameter) simulation.get(GlobalParameterManager.class).getObject(paramName);
-                                // 将转速设置进去，注意 STAR-CCM+ 里默认角速度单位可能是 rad/s 或 rpm，根据你的模型设置调整
-                                rpmParam.getQuantity().setValue(rpms[i]); 
+                                
+                                // 将转速设置进去，注意 STAR-CCM+ 里默认角速度单位可能是 rad/s
+                                double radPerSec = rpms[i] * (Math.PI / 30.0);
+                                rpmParam.getQuantity().setValue(radPerSec); 
                             }
                         } catch (Exception e) {
                             simulation.println("警告: 未找到对应的 RPM 全局参数，请在软件中创建 RPM_0 ~ RPM_5");
                         }
+
+
+                        // 读取 Tethra 计算出的绳缆力 (X, Y, Z)
+                        // double forceX = buffer.getDouble(OFFSET_FORCE_IN);
+                        // double forceY = buffer.getDouble(OFFSET_FORCE_IN + 8);
+                        // double forceZ = buffer.getDouble(OFFSET_FORCE_IN + 16); 
+                        // ContinuumBody continuumBody = ((ContinuumBody) simulation.get(star.sixdof.BodyManager.class).getObject("MainBody"));//Body's Name
+                        // ExternalForce externalForce = ((ExternalForce) continuumBody.getExternalForceAndMomentManager().getObject("CableForce"));//Force's Name              
+                        // Units units_N = ((Units) simulation.getUnitsManager().getObject("N"));
+                        // externalForce.getForce().setComponentsAndUnits(-forceX, -forceY, -forceZ, units_N);//Force value
+                        // Units units_1 = ((Units) simulation.getUnitsManager().getObject("m"));
+                        // externalForce.getPositionAsCoordinate().setCoordinate(units_1, units_1, units_1, new DoubleVector(new double[] {-0.22, 0.0, -0.00497}));//Force acting point  
 
                         //Running simulation
                         int t0 = simulation.getSimulationIterator().getCurrentIteration();
@@ -96,9 +98,9 @@ public class FileConditioned extends StarMacro {
 
                             // 2. 获取位置 x, y, z
                             // 如果你没有创建，请在 STAR-CCM+ 的 Reports 节点下创建它们，监控 MainBody 的平移
-                            double x = ((Report) simulation.getReportManager().getReport("px")).getReportMonitorValue();
-                            double y = ((Report) simulation.getReportManager().getReport("py")).getReportMonitorValue();
-                            double z = ((Report) simulation.getReportManager().getReport("pz")).getReportMonitorValue();
+                            double x = ((Report) simulation.getReportManager().getReport("DisX")).getReportMonitorValue();
+                            double y = ((Report) simulation.getReportManager().getReport("DisY")).getReportMonitorValue();
+                            double z = ((Report) simulation.getReportManager().getReport("DisZ")).getReportMonitorValue();
 
                             // 3. 获取姿态角 (EulerAngle)
                             double roll  = ((Report) simulation.getReportManager().getReport("rx")).getReportMonitorValue();
@@ -142,7 +144,7 @@ public class FileConditioned extends StarMacro {
 			            simulation.saveState("star.sim");
                         simulation.println("Step Completed");
 
-                        buffer.putInt(OFFSET_PROGRAM_CITRINE, 1);
+                        buffer.putInt(OFFSET_PROGRAM_ROVCTRL, 1);
                         buffer.putInt(OFFSET_PROGRAM_STARCCM, 0);
                         buffer.force();                            
                     }
@@ -160,7 +162,7 @@ public class FileConditioned extends StarMacro {
                     int offsetCitrine = readBuffer.getInt(4);
                         
                     simulation.println("OFFSET_PROGRAM_STARCCM" + offsetStarCCM);
-                    simulation.println("OFFSET_PROGRAM_CITRINE" + offsetCitrine);
+                    simulation.println("OFFSET_PROGRAM_ROVCTRL" + offsetCitrine);
                     simulation.println("[STAR CCM+] Pausing Simulation");
                     // simulation.getSimulationIterator().stop();
             }
