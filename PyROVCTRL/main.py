@@ -23,7 +23,7 @@ def main():
     print("\n Wating for StarCCM+ simulating...")
     
     last_display_time = -1.0    # 初始刷新时间
-    display_interval = 1.0      # 屏幕刷新时间 
+    display_interval = 0.01      # 屏幕刷新时间 
     
     print("\n" + "=" * 135)
     print(f"{'Simulating_Time':>8} | {'Position(m)':^25} | {'ControlForce(N/Nm)':^18} | {'Target RPM (T0-T5)':^30} | {'Real RPM ':^30}")

@@ -141,7 +141,7 @@ public class FileConditioned extends StarMacro {
                             simulation.println("写入共享内存失败，请检查 Report 名称是否正确: " + e.getMessage());
                         }
 
-			            simulation.saveState("star.sim");
+			// simulation.saveState("star.sim");
                         simulation.println("Step Completed");
 
                         buffer.putInt(OFFSET_PROGRAM_ROVCTRL, 1);

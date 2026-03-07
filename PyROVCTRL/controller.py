@@ -46,6 +46,11 @@ class ROVConfig:
         self._calculate_thruster_positions()
         self._calculate_thrust_allocation_matrix()
         self._init_thruster_curves()
+        
+        # 【新增】硬件符号映射表 (Actuator Sign Map)
+        # 索引对应: 0:Pbr, 1:Pbl, 2:Pfr, 3:Pfl, 4:Ptr, 5:Ptl
+        # 系数含义: 期望产生正向推力时，RPM 需要乘以的符号
+        self.rpm_sign_map = np.array([1.0, 1.0, -1.0, -1.0, -1.0, -1.0])   
 
     def _calculate_thruster_positions(self):
         """计算每个 thruster 的空间位置和推力方向向量"""
@@ -91,20 +96,21 @@ class ROVConfig:
         self.KT_points = np.array([0.38, 0.35, 0.32, 0.28, 0.24, 0.19, 0.14, 0.08, 0.02])
         self.KT_interp = interp1d(self.J_points, self.KT_points, kind='cubic', fill_value='extrapolate')
         
-    def thrust_to_rpm(self, T_desired, Va):
-        """逆螺旋桨模型：根据期望推力和进速，求解指令转速"""
+    def thrust_to_rpm(self, T_desired, Va, thruster_index):
+        """逆螺旋桨模型：结合硬件安装方向解算最终指令转速"""
         if abs(T_desired) < 1e-6:
             return 0.0
         
+        # 获取推力方向
         sign = np.sign(T_desired)
         T_abs = abs(T_desired)
         
         # 根据 J=0 时的静态推力系数做初始转速猜测
         n_rps = np.sqrt(T_abs / (self.rho_water * self.D_prop**4 * self.KT_points[0]))
         if n_rps < 0.1:
-            n_rps = 5.0  # 设定最小迭代基础转速
+            n_rps = 5.0  
             
-        # 松弛迭代法逼近真实转速 (考虑进速带来的推力衰减)
+        # 松弛迭代法逼近真实转速
         for _ in range(5):
             J = Va / (n_rps * self.D_prop) if n_rps > 0.1 else 0
             J = np.clip(J, 0, 0.8) 
@@ -112,8 +118,9 @@ class ROVConfig:
             n_rps_new = np.sqrt(T_abs / (self.rho_water * self.D_prop**4 * KT)) 
             n_rps = 0.5 * n_rps + 0.5 * n_rps_new 
             
-        return sign * n_rps * 60  # rps 转 rpm
-
+        # 【核心修改】最终转速 = 绝对转速 * 期望推力方向 * 硬件安装映射符号
+        final_rpm = n_rps * 60 * sign * self.rpm_sign_map[thruster_index]
+        return final_rpm
 
 class ROVPIDController:
     """6自由度位姿 PID 控制器"""
@@ -224,11 +231,11 @@ class ThrustAllocator:
 
 
 class MotorController:
-    """电机动态响应控制器"""
+    """电机动态响应控制器 (线性恒定速率爬坡版)"""
     def __init__(self, rov_config):
         self.config = rov_config
-        # 物理延迟时间常数 (一阶系统): 0.133s 对应约 0.4s 的推力达到稳定时间
-        self.motor_time_constant = 0.133  
+        # 设定的转速最大变化率: 15000 rpm/s (即 0.1秒内提速 1500 rpm)
+        self.max_rpm_acceleration = 15000.0  
         self.last_rpm = np.zeros(6)
         self.last_time = None
         
@@ -236,12 +243,14 @@ class MotorController:
         """包装调用配置中的推力转 RPM 功能"""
         rpm = np.zeros(6)
         for i in range(6):
-            rpm[i] = self.config.thrust_to_rpm(thrusts[i], Va_array[i])
+            # 【修改】将当前的索引 i 传给配置类，以便提取对应的符号映射
+            rpm[i] = self.config.thrust_to_rpm(thrusts[i], Va_array[i], thruster_index=i)
+        
         rpm = np.clip(rpm, -self.config.max_rpm, self.config.max_rpm)
         return rpm
     
     def apply_motor_dynamics(self, desired_rpm, current_sim_time):
-        """引入低通滤波器以模拟电机爬坡的物理延迟"""
+        """引入线性速率限制器 (Rate Limiter) 以模拟恒定爬坡"""
         if self.last_time is None:
             self.last_time = current_sim_time
             self.last_rpm = desired_rpm
@@ -250,9 +259,18 @@ class MotorController:
         dt = current_sim_time - self.last_time
         if dt <= 0: return self.last_rpm
 
-        # 一阶离散化公式
-        alpha = dt / (self.motor_time_constant + dt)
-        actual_rpm = self.last_rpm + alpha * (desired_rpm - self.last_rpm)
+        # 1. 计算当前时间步长 (dt) 内允许的最大转速变化量绝对值
+        max_delta = self.max_rpm_acceleration * dt
+        
+        # 2. 计算期望转速与当前真实转速的差值
+        diff = desired_rpm - self.last_rpm
+        
+        # 3. 将差值强制截断在允许的最大变化量范围内
+        # 如果差值很大，本步只增加 max_delta；如果差值很小，就直接补齐差值达到目标
+        actual_delta = np.clip(diff, -max_delta, max_delta)
+        
+        # 4. 获得真实的瞬间转速
+        actual_rpm = self.last_rpm + actual_delta
         
         self.last_rpm = actual_rpm
         self.last_time = current_sim_time
@@ -308,7 +326,44 @@ class ROVControlSystem:
         由外界的主循环(main.py)无脑高频调用即可。
         """
         # 1. 阻塞等待：直到获取到最新的高频物理流场状态
-        current_state = self.cosim.wait_for_cfd_data()
+        raw_state = self.cosim.wait_for_cfd_data()
+        # current_state = self.cosim.wait_for_cfd_data()
+
+        # 杆臂效应修正：将局部坐标系原点速度平移至真实的重心 (CG)
+        v_Ob = np.array([raw_state['u'], raw_state['v'], raw_state['w']])
+        omega = np.array([raw_state['p'], raw_state['q'], raw_state['r']])
+        
+        # 从随体坐标系原点 (Ob) 指向重心 (CG) 的向量
+        r_Ob_to_CG = np.array([-0.1, 0.0, -0.005])
+        
+        # 刚体运动学速度平移公式: V_cg = V_ob + omega × r
+        v_CG = v_Ob + np.cross(omega, r_Ob_to_CG)
+
+        # 坐标系拦截器 (CFD Frame -> Standard NED Frame)
+        # CFD Frame: X=下, Y=右, Z=前
+        # NED Frame: X=前, Y=右, Z=下
+        current_state = {}
+        current_state['timestamp'] = raw_state['timestamp']
+        
+        # 位置与线速度映射 (X 与 Z 对调)
+        current_state['x'] = raw_state['z']  # 将 CFD 的前(Z) 映射给 标准的前(X)
+        current_state['y'] = raw_state['y']  # 右(Y) 不变
+        current_state['z'] = raw_state['x']  # 将 CFD 的下(X) 映射给 标准的下(Z)
+        
+        current_state['u'] = v_CG[2]         # 标准前进速度 u 取自 CFD 的 w
+        current_state['v'] = v_CG[1]         # 标准横移速度 v 取自 CFD 的 v
+        current_state['w'] = v_CG[0]         # 标准下潜速度 w 取自 CFD 的 u
+        
+        # 姿态与角速度映射 (修正 Java 宏中的名称错位)
+        # 记住：Java里 roll=rx(下), pitch=ry(右), yaw=rz(前)
+        current_state['roll']  = raw_state['yaw']   # 绕前方轴旋转才是真 Roll
+        current_state['pitch'] = raw_state['pitch'] # 绕右方轴旋转是真 Pitch
+        current_state['yaw']   = raw_state['roll']  # 绕下方轴旋转才是真 Yaw
+        
+        current_state['p'] = raw_state['r']  # 真 Roll_rate
+        current_state['q'] = raw_state['q']  # 真 Pitch_rate
+        current_state['r'] = raw_state['p']  # 真 Yaw_rate
+        
         current_sim_time = current_state['timestamp']
         
         # ==========================================
