@@ -28,7 +28,7 @@ class ROVConfig:
         
         # 推进器基础配置
         thruster_cfg = cfg.get('thrusters', {})
-        self.max_rpm = thruster_cfg.get('max_rpm', 2000)
+        self.max_rpm = thruster_cfg.get('max_rpm', 1200)
         self.thruster_deflection_angle = np.deg2rad(thruster_cfg.get('deflection_angle_deg', 30))
         self.n_thrusters = 6
         self.thruster_radius = 0.050
@@ -37,8 +37,8 @@ class ROVConfig:
         self.Bbp = 0.150  # 后推进器横向偏移
         self.Bfp = 0.150  # 前推进器横向偏移
         self.Btp = 0.165  # 垂向推进器横向偏移
-        self.Lbp = 0.250  # 后推进器纵向距离
-        self.Lfp = 0.250  # 前推进器纵向距离
+        self.Lbp = 0.200  # 后推进器纵向距离
+        self.Lfp = 0.200  # 前推进器纵向距离
         self.Htp = 0.037  # 垂向推进器垂向距离
         self.H0 = 0.100   # CG到中心线的垂向距离
         
@@ -46,34 +46,44 @@ class ROVConfig:
         self._calculate_thruster_positions()
         self._calculate_thrust_allocation_matrix()
         self._init_thruster_curves()
-        
-        # 【新增】硬件符号映射表 (Actuator Sign Map)
-        # 索引对应: 0:Pbr, 1:Pbl, 2:Pfr, 3:Pfl, 4:Ptr, 5:Ptl
-        # 系数含义: 期望产生正向推力时，RPM 需要乘以的符号
-        self.rpm_sign_map = np.array([1.0, 1.0, -1.0, -1.0, -1.0, -1.0])   
+        # 【修改】硬件符号映射表 (Actuator Sign Map)
+        # 严格对应 CFD 绑定: 0:Pfl(左前), 1:Pfr(右前), 2:Pbl(左后), 3:Pbr(右后), 4:Ptl(左顶), 5:Ptr(右顶)
+        # 前桨前进需反转(-1)，后桨前进需正转(+1)，顶桨下潜需反转(-1)
+        self.rpm_sign_map = np.array([-1.0, -1.0, 1.0, 1.0, -1.0, -1.0])
 
     def _calculate_thruster_positions(self):
-        """计算每个 thruster 的空间位置和推力方向向量"""
+        """计算每个 thruster 的空间位置和推力方向 (基于 NED: X=前, Y=右, Z=下)"""
         self.thruster_positions = np.zeros((6, 3))
-        # 0: 右后, 1: 左后, 2: 右前, 3: 左前, 4: 右上(垂), 5: 左上(垂)
-        self.thruster_positions[0] = [0, -self.Bbp, -self.Lbp]
-        self.thruster_positions[1] = [0, self.Bbp, -self.Lbp]
-        self.thruster_positions[2] = [0, -self.Bfp, self.Lfp]
-        self.thruster_positions[3] = [0, self.Bfp, self.Lfp]
-        self.thruster_positions[4] = [-self.Htp, -self.Btp, 0]
-        self.thruster_positions[5] = [-self.Htp, self.Btp, 0]
         
+        # 索引对应 -> 0: 左前, 1: 右前, 2: 左后, 3: 右后, 4: 左顶, 5: 右顶
+        # NED坐标系 -> 前为+X, 后为-X | 右为+Y, 左为-Y | 下为+Z, 上为-Z (重心CG为原点0,0,0)
+        self.thruster_positions[0] = [ self.Lfp, -self.Bfp, 0]         # 0: 左前 (X前, Y左)
+        self.thruster_positions[1] = [ self.Lfp, self.Bfp, 0]          # 1: 右前 (X前, Y右)
+        self.thruster_positions[2] = [-self.Lbp, -self.Bbp, 0]         # 2: 左后 (X后, Y左)
+        self.thruster_positions[3] = [-self.Lbp, self.Bbp, 0]          # 3: 右后 (X后, Y右)
+        self.thruster_positions[4] = [0, -self.Btp, -self.Htp]         # 4: 左顶 (Z上, Y左)
+        self.thruster_positions[5] = [0, self.Btp, -self.Htp]          # 5: 右顶 (Z上, Y右)
+        
+        # 推力方向向量 (当产生正向推力时，力量在 X, Y, Z 轴上的投影分量)
         self.thruster_directions = np.zeros((6, 3))
         angle = self.thruster_deflection_angle
-        # 水平推进器 (0-3) - 呈 X 型布置
-        for i in range(4):
-            self.thruster_directions[i] = [0, np.sin(angle), np.cos(angle)]
-            if i in [0, 2]:  # 右侧推进器横向分量反号
-                self.thruster_directions[i, 1] = -np.sin(angle)
         
-        # 垂向推进器 (4-5) - 向下为正
-        self.thruster_directions[4] = [1, 0, 0]  
-        self.thruster_directions[5] = [1, 0, 0]
+        # 水平推进器 (0-3) - 严格匹配你的图纸
+        # 0: 左前 (Pfl) -> 向前(+X)，向左(-Y)
+        self.thruster_directions[0] = [np.cos(angle), -np.sin(angle), 0] 
+        
+        # 1: 右前 (Pfr) -> 向前(+X)，向右(+Y) (与左前对称)
+        self.thruster_directions[1] = [np.cos(angle),  np.sin(angle), 0] 
+        
+        # 2: 左后 (Pbl) -> 向前(+X)，向右(+Y) (通常与对角线的右前平行)
+        self.thruster_directions[2] = [np.cos(angle),  np.sin(angle), 0] 
+        
+        # 3: 右后 (Pbr) -> 向前(+X)，向左(-Y) (通常与对角线的左前平行)
+        self.thruster_directions[3] = [np.cos(angle), -np.sin(angle), 0] 
+        
+        # 垂向推进器 (4-5) - 向下推 (+Z方向)
+        self.thruster_directions[4] = [0, 0, 1]  
+        self.thruster_directions[5] = [0, 0, 1]
         
     def _calculate_thrust_allocation_matrix(self):
         """生成推力分配矩阵 A_matrix (6x6)"""
@@ -134,11 +144,11 @@ class ROVPIDController:
         
         # 提取增益参数
         self.Kp_pos = np.array(pos_cfg.get('kp', [50.0, 50.0, 80.0]))
-        self.Ki_pos = np.array(pos_cfg.get('ki', [5.0, 5.0, 10.0]))
+        self.Ki_pos = np.array(pos_cfg.get('ki', [0.0, 0.0, 0.0]))
         self.Kd_pos = np.array(pos_cfg.get('kd', [30.0, 30.0, 40.0]))
         
         self.Kp_att = np.array(att_cfg.get('kp', [20.0, 20.0, 40.0]))
-        self.Ki_att = np.array(att_cfg.get('ki', [2.0, 2.0, 5.0]))
+        self.Ki_att = np.array(att_cfg.get('ki', [0.0, 0.0, 0.0]))
         self.Kd_att = np.array(att_cfg.get('kd', [15.0, 15.0, 25.0]))
         
         # 积分限幅器

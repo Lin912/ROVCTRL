@@ -96,26 +96,30 @@ public class FileConditioned extends StarMacro {
                             // 1. 获取当前物理时间 (Timestamp)
                             double timestamp = simulation.getSolution().getPhysicalTime();
 
+
                             // 2. 获取位置 x, y, z
-                            // 如果你没有创建，请在 STAR-CCM+ 的 Reports 节点下创建它们，监控 MainBody 的平移
-                            double x = ((Report) simulation.getReportManager().getReport("DisX")).getReportMonitorValue();
-                            double y = ((Report) simulation.getReportManager().getReport("DisY")).getReportMonitorValue();
-                            double z = ((Report) simulation.getReportManager().getReport("DisZ")).getReportMonitorValue();
-
+                            // Python(NED): X前+, Y右+, Z下+
+                            // CFD(STAR): DisZ前+, DisY左+, DisX下+
+                            double x =  ((Report) simulation.getReportManager().getReport("DisZ")).getReportMonitorValue();
+                            double y = -((Report) simulation.getReportManager().getReport("DisY")).getReportMonitorValue(); // 【注意负号】向右为正
+                            double z =  ((Report) simulation.getReportManager().getReport("DisX")).getReportMonitorValue();
+                            
                             // 3. 获取姿态角 (EulerAngle)
-                            double roll  = ((Report) simulation.getReportManager().getReport("rx")).getReportMonitorValue();
-                            double pitch = ((Report) simulation.getReportManager().getReport("ry")).getReportMonitorValue();
-                            double yaw   = ((Report) simulation.getReportManager().getReport("rz")).getReportMonitorValue();
-
+                            // Python(NED): Roll右倾+, Pitch抬头+, Yaw右转
+                            // CFD(STAR): rz左倾+, ry低头+, rx右转+
+                            double roll  =  ((Report) simulation.getReportManager().getReport("rz")).getReportMonitorValue(); // 【注意负号】右倾为正
+                            double pitch = -((Report) simulation.getReportManager().getReport("ry")).getReportMonitorValue(); // 【注意负号】抬头为正
+                            double yaw   =  ((Report) simulation.getReportManager().getReport("rx")).getReportMonitorValue(); // 符号一致
+                            
                             // 4. 获取相对线速度 (VelocityRelative)
-                            double u = ((Report) simulation.getReportManager().getReport("Vrx")).getReportMonitorValue();
-                            double v = ((Report) simulation.getReportManager().getReport("Vry")).getReportMonitorValue();
-                            double w = ((Report) simulation.getReportManager().getReport("Vrz")).getReportMonitorValue();
-
+                            double u =  ((Report) simulation.getReportManager().getReport("Vrz")).getReportMonitorValue();
+                            double v = -((Report) simulation.getReportManager().getReport("Vry")).getReportMonitorValue(); // 【注意负号】
+                            double w =  ((Report) simulation.getReportManager().getReport("Vrx")).getReportMonitorValue();
+                            
                             // 5. 获取相对角速度 (omegaRelative)
-                            double p = ((Report) simulation.getReportManager().getReport("omegarx")).getReportMonitorValue();
-                            double q = ((Report) simulation.getReportManager().getReport("omegary")).getReportMonitorValue();
-                            double r = ((Report) simulation.getReportManager().getReport("omegarz")).getReportMonitorValue();
+                            double p =  ((Report) simulation.getReportManager().getReport("omegarz")).getReportMonitorValue(); // 【注意负号】
+                            double q = -((Report) simulation.getReportManager().getReport("omegary")).getReportMonitorValue(); // 【注意负号】
+                            double r =  ((Report) simulation.getReportManager().getReport("omegarx")).getReportMonitorValue();
 
                             // =========================================================
                             // 严格按照 Python 端 unpack('13d') 的顺序，写入连续的 104 字节
