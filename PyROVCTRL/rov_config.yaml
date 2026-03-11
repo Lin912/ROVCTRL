@@ -11,7 +11,7 @@ robot:
     - 0.000
     - -0.005
   thrusters:
-    max_rpm: 1200
+    max_rpm: 2000
     deflection_angle_deg: 30 # 安装偏置角度(度) 
 
 pid:

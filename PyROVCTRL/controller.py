@@ -28,10 +28,10 @@ class ROVConfig:
         
         # 推进器基础配置
         thruster_cfg = cfg.get('thrusters', {})
-        self.max_rpm = thruster_cfg.get('max_rpm', 1200)
+        self.max_rpm = thruster_cfg.get('max_rpm', 2000)
         self.thruster_deflection_angle = np.deg2rad(thruster_cfg.get('deflection_angle_deg', 30))
         self.n_thrusters = 6
-        self.thruster_radius = 0.050
+        self.thruster_radius = 0.060
         
         # 推进器安装位置偏移量 (相对于 CG)
         self.Bbp = 0.150  # 后推进器横向偏移
@@ -47,43 +47,38 @@ class ROVConfig:
         self._calculate_thrust_allocation_matrix()
         self._init_thruster_curves()
         # 【修改】硬件符号映射表 (Actuator Sign Map)
-        # 严格对应 CFD 绑定: 0:Pfl(左前), 1:Pfr(右前), 2:Pbl(左后), 3:Pbr(右后), 4:Ptl(左顶), 5:Ptr(右顶)
-        # 前桨前进需反转(-1)，后桨前进需正转(+1)，顶桨下潜需反转(-1)
-        self.rpm_sign_map = np.array([-1.0, -1.0, 1.0, 1.0, -1.0, -1.0])
+        # 前桨前进需反转(-1)，后桨前进需正转(+1)，顶桨up需+转(1)
+        self.rpm_sign_map = np.array([-1.0, -1.0, 1.0, 1.0, 1.0, 1.0])
 
     def _calculate_thruster_positions(self):
         """计算每个 thruster 的空间位置和推力方向 (基于 NED: X=前, Y=右, Z=下)"""
         self.thruster_positions = np.zeros((6, 3))
         
-        # 索引对应 -> 0: 左前, 1: 右前, 2: 左后, 3: 右后, 4: 左顶, 5: 右顶
-        # NED坐标系 -> 前为+X, 后为-X | 右为+Y, 左为-Y | 下为+Z, 上为-Z (重心CG为原点0,0,0)
-        self.thruster_positions[0] = [ self.Lfp, -self.Bfp, 0]         # 0: 左前 (X前, Y左)
-        self.thruster_positions[1] = [ self.Lfp, self.Bfp, 0]          # 1: 右前 (X前, Y右)
-        self.thruster_positions[2] = [-self.Lbp, -self.Bbp, 0]         # 2: 左后 (X后, Y左)
-        self.thruster_positions[3] = [-self.Lbp, self.Bbp, 0]          # 3: 右后 (X后, Y右)
-        self.thruster_positions[4] = [0, -self.Btp, -self.Htp]         # 4: 左顶 (Z上, Y左)
-        self.thruster_positions[5] = [0, self.Btp, -self.Htp]          # 5: 右顶 (Z上, Y右)
+        # 【核心修正】严格对齐 CFD 通道 -> 0:右前, 1:左前, 2:右后, 3:左后, 4:右顶, 5:左顶
+        # NED坐标系 -> 前为+X, 后为-X | 右为+Y, 左为-Y | 下为+Z, 上为-Z
+        self.thruster_positions[0] = [ self.Lfp,  self.Bfp, 0]         # 0: 右前 (Y为正)
+        self.thruster_positions[1] = [ self.Lfp, -self.Bfp, 0]         # 1: 左前 (Y为负)
+        self.thruster_positions[2] = [-self.Lbp,  self.Bbp, 0]         # 2: 右后 (Y为正)
+        self.thruster_positions[3] = [-self.Lbp, -self.Bbp, 0]         # 3: 左后 (Y为负)
+        self.thruster_positions[4] = [0,  self.Btp, -self.Htp-self.H0]         # 4: 右顶 (Y为正)
+        self.thruster_positions[5] = [0, -self.Btp, -self.Htp-self.H0]         # 5: 左顶 (Y为负)
         
         # 推力方向向量 (当产生正向推力时，力量在 X, Y, Z 轴上的投影分量)
         self.thruster_directions = np.zeros((6, 3))
         angle = self.thruster_deflection_angle
         
-        # 水平推进器 (0-3) - 严格匹配你的图纸
-        # 0: 左前 (Pfl) -> 向前(+X)，向左(-Y)
-        self.thruster_directions[0] = [np.cos(angle), -np.sin(angle), 0] 
+        # 0: 右前 -> 向前(+X)，向右(+Y)
+        self.thruster_directions[0] = [np.cos(angle),  np.sin(angle), 0] 
+        # 1: 左前 -> 向前(+X)，向左(-Y)
+        self.thruster_directions[1] = [np.cos(angle), -np.sin(angle), 0] 
+        # 2: 右后 -> 向前(+X)，向左(-Y) (通常与对角线的左前平行)
+        self.thruster_directions[2] = [np.cos(angle), -np.sin(angle), 0] 
+        # 3: 左后 -> 向前(+X)，向右(+Y) (通常与对角线的右前平行)
+        self.thruster_directions[3] = [np.cos(angle),  np.sin(angle), 0] 
         
-        # 1: 右前 (Pfr) -> 向前(+X)，向右(+Y) (与左前对称)
-        self.thruster_directions[1] = [np.cos(angle),  np.sin(angle), 0] 
-        
-        # 2: 左后 (Pbl) -> 向前(+X)，向右(+Y) (通常与对角线的右前平行)
-        self.thruster_directions[2] = [np.cos(angle),  np.sin(angle), 0] 
-        
-        # 3: 右后 (Pbr) -> 向前(+X)，向左(-Y) (通常与对角线的左前平行)
-        self.thruster_directions[3] = [np.cos(angle), -np.sin(angle), 0] 
-        
-        # 垂向推进器 (4-5) - 向下推 (+Z方向)
-        self.thruster_directions[4] = [0, 0, 1]  
-        self.thruster_directions[5] = [0, 0, 1]
+        # 垂向推进器 (4-5) - up (-Z方向)
+        self.thruster_directions[4] = [0, 0, -1]  
+        self.thruster_directions[5] = [0, 0, -1]
         
     def _calculate_thrust_allocation_matrix(self):
         """生成推力分配矩阵 A_matrix (6x6)"""
@@ -305,7 +300,7 @@ class ROVControlSystem:
         
         # 期望保持的默认位姿
         self.desired_state = {
-            'x': 0.0, 'y': 0.0, 'z': -5.0,
+            'x': -0.05, 'y': 0.0, 'z': 0.0,
             'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0
         }
         
@@ -344,35 +339,31 @@ class ROVControlSystem:
         omega = np.array([raw_state['p'], raw_state['q'], raw_state['r']])
         
         # 从随体坐标系原点 (Ob) 指向重心 (CG) 的向量
-        r_Ob_to_CG = np.array([-0.1, 0.0, -0.005])
+        r_Ob_to_CG = np.array([0.00, 0.00, 0.00])
         
         # 刚体运动学速度平移公式: V_cg = V_ob + omega × r
         v_CG = v_Ob + np.cross(omega, r_Ob_to_CG)
-
-        # 坐标系拦截器 (CFD Frame -> Standard NED Frame)
-        # CFD Frame: X=下, Y=右, Z=前
-        # NED Frame: X=前, Y=右, Z=下
+        
         current_state = {}
         current_state['timestamp'] = raw_state['timestamp']
         
-        # 位置与线速度映射 (X 与 Z 对调)
-        current_state['x'] = raw_state['z']  # 将 CFD 的前(Z) 映射给 标准的前(X)
-        current_state['y'] = raw_state['y']  # 右(Y) 不变
-        current_state['z'] = raw_state['x']  # 将 CFD 的下(X) 映射给 标准的下(Z)
+        # 位置与线速度透传映射 (坐标对应)
+        current_state['x'] = raw_state['x']
+        current_state['y'] = raw_state['y']
+        current_state['z'] = raw_state['z']
         
-        current_state['u'] = v_CG[2]         # 标准前进速度 u 取自 CFD 的 w
-        current_state['v'] = v_CG[1]         # 标准横移速度 v 取自 CFD 的 v
-        current_state['w'] = v_CG[0]         # 标准下潜速度 w 取自 CFD 的 u
+        current_state['u'] = v_CG[0]
+        current_state['v'] = v_CG[1]
+        current_state['w'] = v_CG[2]
         
-        # 姿态与角速度映射 (修正 Java 宏中的名称错位)
-        # 记住：Java里 roll=rx(下), pitch=ry(右), yaw=rz(前)
-        current_state['roll']  = raw_state['yaw']   # 绕前方轴旋转才是真 Roll
-        current_state['pitch'] = raw_state['pitch'] # 绕右方轴旋转是真 Pitch
-        current_state['yaw']   = raw_state['roll']  # 绕下方轴旋转才是真 Yaw
+        # 姿态与角速度透传映射 (坐标对应)
+        current_state['roll']  = raw_state['roll']
+        current_state['pitch'] = raw_state['pitch']
+        current_state['yaw']   = raw_state['yaw']
         
-        current_state['p'] = raw_state['r']  # 真 Roll_rate
-        current_state['q'] = raw_state['q']  # 真 Pitch_rate
-        current_state['r'] = raw_state['p']  # 真 Yaw_rate
+        current_state['p'] = raw_state['p']
+        current_state['q'] = raw_state['q']
+        current_state['r'] = raw_state['r']
         
         current_sim_time = current_state['timestamp']
         
